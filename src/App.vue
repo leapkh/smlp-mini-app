@@ -17,7 +17,7 @@
         <main class="content">
           <section v-if="screen === 'allServices'" class="service-list-screen">
             <div class="service-list-appbar">
-              <button type="button" class="round-button" @click="screen = 'home'">
+              <button type="button" class="round-button" @click="goHomeFromServiceList">
                 <Icon name="back" />
               </button>
               <div>
@@ -69,7 +69,7 @@
             <section>
               <div class="section-header">
                 <h2>Our Services</h2>
-                <button type="button" class="link-button" @click="screen = 'allServices'">View All</button>
+                <button type="button" class="link-button" @click="goToServiceList">View All</button>
               </div>
 
               <div class="list">
@@ -269,6 +269,26 @@ function handleStatusOk() {
   screen.value = 'home';
 }
 
+function goToServiceList() {
+  screen.value = 'allServices';
+  window.location.hash = '#service-list';
+
+}
+
+function goHomeFromServiceList() {
+  screen.value = 'home';
+  window.location.hash = '#home';
+}
+
+function handleHashChange() {
+  const hash = window.location.hash;
+  if (hash === '#service-list') {
+    screen.value = 'allServices';
+  } else {
+    screen.value = 'home';
+}
+}
+
 function nextSlide() {
   activeSlide.value = (activeSlide.value + 1) % slides.length;
 }
@@ -307,6 +327,8 @@ function handleSlideSwipe(endX) {
 
 onMounted(async () => {
   restartAutoSlide();
+  window.addEventListener('hashchange', handleHashChange);
+  handleHashChange();
   registerHandler('getStatus', (data, callback) => {
     paymentStatus.value = data?.payload || data || {};
     if (typeof callback === 'function') callback({ received: true });
@@ -323,6 +345,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (slideTimer) window.clearInterval(slideTimer);
+  window.removeEventListener('hashchange', handleHashChange);
 });
 
 const ServiceCard = defineComponent({
