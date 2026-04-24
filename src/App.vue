@@ -41,7 +41,7 @@
               <button
                 type="button"
                 class="hero-card"
-                @click="selectedSlide = slides[activeSlide]"
+                @click="onSlideClick"
                 @touchstart="handleSlideTouchStart"
                 @touchend="handleSlideTouchEnd"
                 @mousedown="handleSlideMouseStart"
@@ -61,7 +61,7 @@
                   :key="slide.title"
                   type="button"
                   :class="['dot', activeSlide === index ? 'active' : '']"
-                  @click="activeSlide = index"
+                  @click="onDotClick(index)"
                 ></button>
               </div>
             </section>
@@ -291,10 +291,20 @@ function handleHashChange() {
 
 function nextSlide() {
   activeSlide.value = (activeSlide.value + 1) % slides.length;
+  window.dataLayer?.push({
+    event: 'slideshow_slide',
+    index: activeSlide.value,
+    title: slides[activeSlide.value]?.title
+  });
 }
 
 function previousSlide() {
   activeSlide.value = (activeSlide.value - 1 + slides.length) % slides.length;
+  window.dataLayer?.push({
+    event: 'slideshow_slide',
+    index: activeSlide.value,
+    title: slides[activeSlide.value]?.title
+  });
 }
 
 function restartAutoSlide() {
@@ -347,6 +357,25 @@ onBeforeUnmount(() => {
   if (slideTimer) window.clearInterval(slideTimer);
   window.removeEventListener('hashchange', handleHashChange);
 });
+
+function onSlideClick() {
+  const slide = slides[activeSlide.value];
+  selectedSlide.value = slide;
+  window.dataLayer?.push({
+    event: 'slideshow_click',
+    index: activeSlide.value,
+    title: slide?.title
+  });
+}
+
+function onDotClick(index) {
+  activeSlide.value = index;
+  window.dataLayer?.push({
+    event: 'slideshow_slide',
+    index,
+    title: slides[index]?.title
+  });
+}
 
 const ServiceCard = defineComponent({
   props: { service: { type: Object, required: true } },
@@ -683,3 +712,9 @@ h2 { font-size: 20px; }
 .payment-success p { font-size: 14px; margin-top: 2px; }
 @media (max-width: 430px) { .page { padding: 0; } .phone { height: 100vh; max-width: none; border-radius: 0; border: 0; } }
 </style>
+
+
+<!-- GTM event helpers added -->
+<script>
+// NOTE: this block is just explanatory; actual calls are in script setup above.
+</script>
