@@ -253,7 +253,7 @@ const profileName = ref('');
 const screen = ref('home');
 const activeSlide = ref(0);
 const slideStartX = ref(0);
-let slideTimer = null;
+let slideTimer = null; // disabled auto slide
 const activeTab = ref('services');
 const selectedSlide = ref(null);
 const selectedService = ref(null);
@@ -308,8 +308,7 @@ function previousSlide() {
 }
 
 function restartAutoSlide() {
-  if (slideTimer) window.clearInterval(slideTimer);
-  slideTimer = window.setInterval(nextSlide, 3500);
+  // auto slide disabled
 }
 
 function handleSlideTouchStart(event) {
@@ -336,7 +335,6 @@ function handleSlideSwipe(endX) {
 }
 
 onMounted(async () => {
-  restartAutoSlide();
   window.addEventListener('hashchange', handleHashChange);
   handleHashChange();
   registerHandler('getStatus', (data, callback) => {
@@ -354,7 +352,6 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  if (slideTimer) window.clearInterval(slideTimer);
   window.removeEventListener('hashchange', handleHashChange);
 });
 
