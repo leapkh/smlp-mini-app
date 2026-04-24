@@ -1,8 +1,8 @@
 <template>
   <div class="page">
     <div class="phone">
-      <div class="scroll-area">
-        <header class="appbar">
+      <div :class="['scroll-area', screen === 'allServices' ? 'service-list-scroll' : '']">
+        <header v-if="screen === 'home'" class="appbar">
           <div class="bubble bubble-one"></div>
           <div class="bubble bubble-two"></div>
           <div class="brand-row">
@@ -15,14 +15,14 @@
         </header>
 
         <main class="content">
-          <section v-if="screen === 'allServices'">
-            <div class="screen-title-row">
+          <section v-if="screen === 'allServices'" class="service-list-screen">
+            <div class="service-list-appbar">
               <button type="button" class="round-button" @click="screen = 'home'">
                 <Icon name="back" />
               </button>
               <div>
                 <p class="eyebrow">Choose a service</p>
-                <h2>All Services</h2>
+                <h2>Service List</h2>
               </div>
             </div>
 
@@ -38,7 +38,15 @@
 
           <template v-if="screen === 'home' && activeTab === 'services'">
             <section>
-              <button type="button" class="hero-card" @click="selectedSlide = slides[activeSlide]">
+              <button
+                type="button"
+                class="hero-card"
+                @click="selectedSlide = slides[activeSlide]"
+                @touchstart="handleSlideTouchStart"
+                @touchend="handleSlideTouchEnd"
+                @mousedown="handleSlideMouseStart"
+                @mouseup="handleSlideMouseEnd"
+              >
                 <img :src="slides[activeSlide].image" :alt="slides[activeSlide].title" />
                 <div class="hero-overlay"></div>
                 <div class="hero-text">
@@ -127,7 +135,7 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, onMounted, ref } from 'vue';
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref } from 'vue';
 import { callHandler, registerHandler } from 'web-bridge-gateway';
 
 const Icon = defineComponent({
@@ -244,6 +252,8 @@ const recentBookings = [
 const profileName = ref('');
 const screen = ref('home');
 const activeSlide = ref(0);
+const slideStartX = ref(0);
+let slideTimer = null;
 const activeTab = ref('services');
 const selectedSlide = ref(null);
 const selectedService = ref(null);
@@ -259,7 +269,44 @@ function handleStatusOk() {
   screen.value = 'home';
 }
 
+function nextSlide() {
+  activeSlide.value = (activeSlide.value + 1) % slides.length;
+}
+
+function previousSlide() {
+  activeSlide.value = (activeSlide.value - 1 + slides.length) % slides.length;
+}
+
+function restartAutoSlide() {
+  if (slideTimer) window.clearInterval(slideTimer);
+  slideTimer = window.setInterval(nextSlide, 3500);
+}
+
+function handleSlideTouchStart(event) {
+  slideStartX.value = event.touches?.[0]?.clientX || 0;
+}
+
+function handleSlideTouchEnd(event) {
+  handleSlideSwipe(event.changedTouches?.[0]?.clientX || 0);
+}
+
+function handleSlideMouseStart(event) {
+  slideStartX.value = event.clientX || 0;
+}
+
+function handleSlideMouseEnd(event) {
+  handleSlideSwipe(event.clientX || 0);
+}
+
+function handleSlideSwipe(endX) {
+  const distance = endX - slideStartX.value;
+  if (Math.abs(distance) < 40) return;
+  distance < 0 ? nextSlide() : previousSlide();
+  restartAutoSlide();
+}
+
 onMounted(async () => {
+  restartAutoSlide();
   registerHandler('getStatus', (data, callback) => {
     paymentStatus.value = data?.payload || data || {};
     if (typeof callback === 'function') callback({ received: true });
@@ -272,6 +319,10 @@ onMounted(async () => {
   } catch (error) {
     console.warn('getProfile handler failed:', error);
   }
+});
+
+onBeforeUnmount(() => {
+  if (slideTimer) window.clearInterval(slideTimer);
 });
 
 const ServiceCard = defineComponent({
@@ -492,6 +543,9 @@ svg { width: 1.25rem; height: 1.25rem; }
 .page { min-height: 100vh; background: #f1f5f9; display: flex; align-items: center; justify-content: center; padding: 16px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; }
 .phone { width: 100%; max-width: 390px; height: 820px; background: white; border-radius: 40px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 25px 50px rgba(15, 23, 42, 0.22); position: relative; }
 .scroll-area { height: 100%; overflow-y: auto; padding-bottom: 96px; background: #f8fafc; }
+.service-list-scroll { padding-bottom: 20px; }
+.service-list-screen { margin: -20px; min-height: 820px; padding: 20px; background: #f8fafc; }
+.service-list-appbar { margin: -20px -20px 20px; padding: 52px 20px 24px; display: flex; gap: 12px; align-items: center; background: white; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); }
 .appbar { position: relative; overflow: hidden; background: linear-gradient(135deg, #06b6d4, #0ea5e9, #2563eb); padding: 48px 24px 28px; color: white; border-bottom-left-radius: 32px; border-bottom-right-radius: 32px; }
 .bubble { position: absolute; border-radius: 999px; background: rgba(255,255,255,.15); }
 .bubble-one { right: -40px; top: -40px; width: 144px; height: 144px; }
