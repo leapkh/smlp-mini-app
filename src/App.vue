@@ -6,6 +6,7 @@ const account = ref('ABA001')
 const amount = ref('1.5')
 const currency = ref('USD')
 const secretKey = ref('')
+const fee = ref('0')
 
 const showStatusDialog = ref(false)
 const statusPayload = ref({})
@@ -26,10 +27,11 @@ async function sha256Uppercase(text) {
   const data = encoder.encode(text)
   const hashBuffer = await crypto.subtle.digest('SHA-256', data)
   const hashArray = Array.from(new Uint8Array(hashBuffer))
-  const hashHex = hashArray
+
+  return hashArray
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
-  return hashHex.toUpperCase()
+    .toUpperCase()
 }
 
 async function buildHash() {
@@ -41,13 +43,19 @@ async function handlePay() {
   try {
     const hash = await buildHash()
 
+    const additionalKey = {
+      hash,
+    }
+
+    if (Number(fee.value) !== 0) {
+      additionalKey.fee = fee.value
+    }
+
     const payload = {
       account: account.value,
       amount: amount.value,
       currency: currency.value,
-      additionalKey: {
-        hash,
-      },
+      additionalKey,
     }
 
     const result = await callHandler('doPayment', payload)
@@ -80,11 +88,16 @@ onMounted(() => {
       <input v-model="amount" placeholder="Amount" />
       <input v-model="currency" placeholder="Currency" />
       <input v-model="secretKey" placeholder="Secret Key" type="password" />
+      <input v-model="fee" placeholder="Fee" />
 
       <button type="submit">Pay</button>
     </form>
 
-    <div v-if="showStatusDialog" class="dialog-overlay" @click.self="showStatusDialog = false">
+    <div
+      v-if="showStatusDialog"
+      class="dialog-overlay"
+      @click.self="showStatusDialog = false"
+    >
       <div class="dialog">
         <div class="success-icon">✓</div>
         <h3>Success</h3>
@@ -100,7 +113,9 @@ onMounted(() => {
           </div>
         </div>
 
-        <button class="close-btn" @click="showStatusDialog = false">Close</button>
+        <button class="close-btn" @click="showStatusDialog = false">
+          Close
+        </button>
       </div>
     </div>
   </div>
