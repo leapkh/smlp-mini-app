@@ -116,7 +116,7 @@
           <Icon name="home" />
           <span>Services</span>
         </button>
-        <button type="button" :class="['tab', activeTab === 'bookings' ? 'active' : '']" @click="activeTab = 'bookings'">
+        <button type="button" :class="['tab', activeTab === 'bookings' ? 'active' : '']" @click="onBookingsTabClick">
           <Icon name="booking" />
           <span>Bookings</span>
         </button>
@@ -137,6 +137,7 @@
 <script setup>
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref } from 'vue';
 import { callHandler, registerHandler } from 'web-bridge-gateway';
+import VConsole from 'vconsole';
 
 const Icon = defineComponent({
   props: {
@@ -250,6 +251,12 @@ const recentBookings = [
 ];
 
 const profileName = ref('');
+function pushDataLayer(eventPayload) {
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push(eventPayload);
+  console.log('dataLayer event:', eventPayload);
+}
+
 const screen = ref('home');
 const activeSlide = ref(0);
 const slideStartX = ref(0);
@@ -273,11 +280,20 @@ function goToServiceList() {
   screen.value = 'allServices';
   window.location.hash = '#service-list';
 
+  pushDataLayer({
+    event: 'page_view',
+    page: 'service_list'
+  });
 }
 
 function goHomeFromServiceList() {
   screen.value = 'home';
   window.location.hash = '#home';
+
+  pushDataLayer({
+    event: 'page_view',
+    page: 'home'
+  });
 }
 
 function handleHashChange() {
@@ -286,12 +302,12 @@ function handleHashChange() {
     screen.value = 'allServices';
   } else {
     screen.value = 'home';
-}
+  }
 }
 
 function nextSlide() {
   activeSlide.value = (activeSlide.value + 1) % slides.length;
-  window.dataLayer?.push({
+  pushDataLayer({
     event: 'slideshow_slide',
     index: activeSlide.value,
     title: slides[activeSlide.value]?.title
@@ -300,7 +316,7 @@ function nextSlide() {
 
 function previousSlide() {
   activeSlide.value = (activeSlide.value - 1 + slides.length) % slides.length;
-  window.dataLayer?.push({
+  pushDataLayer({
     event: 'slideshow_slide',
     index: activeSlide.value,
     title: slides[activeSlide.value]?.title
@@ -335,10 +351,24 @@ function handleSlideSwipe(endX) {
 }
 
 onMounted(async () => {
+  // init vConsole
+  try {
+    const vConsole = new VConsole();
+    console.log('vConsole initialized');
+  } catch (e) {
+    console.warn('vConsole init failed', e);
+  }
   window.addEventListener('hashchange', handleHashChange);
   handleHashChange();
   registerHandler('getStatus', (data, callback) => {
-    paymentStatus.value = data?.payload || data || {};
+    const payload = data?.payload || data || {};
+    paymentStatus.value = payload;
+
+    pushDataLayer({
+      event: 'payment_success',
+      ...payload
+    });
+
     if (typeof callback === 'function') callback({ received: true });
   });
 
@@ -358,7 +388,7 @@ onBeforeUnmount(() => {
 function onSlideClick() {
   const slide = slides[activeSlide.value];
   selectedSlide.value = slide;
-  window.dataLayer?.push({
+  pushDataLayer({
     event: 'slideshow_click',
     index: activeSlide.value,
     title: slide?.title
@@ -367,10 +397,18 @@ function onSlideClick() {
 
 function onDotClick(index) {
   activeSlide.value = index;
-  window.dataLayer?.push({
+  pushDataLayer({
     event: 'slideshow_slide',
     index,
     title: slides[index]?.title
+  });
+}
+
+function onBookingsTabClick() {
+  activeTab.value = 'bookings';
+  pushDataLayer({
+    event: 'bookings_tab_click',
+    page: 'bookings'
   });
 }
 
@@ -451,6 +489,15 @@ const ServiceDetailSheet = defineComponent({
       isPaying.value = true;
       try {
         const calculatedHash = await updateHash();
+
+        pushDataLayer({
+          event: 'payment_click',
+          account: account.value,
+          amount: amount.value,
+          currency: currency.value,
+          fee: fee.value
+        });
+
         await callHandler('doPayment', {
           account: account.value,
           amount: amount.value,
@@ -709,9 +756,3 @@ h2 { font-size: 20px; }
 .payment-success p { font-size: 14px; margin-top: 2px; }
 @media (max-width: 430px) { .page { padding: 0; } .phone { height: 100vh; max-width: none; border-radius: 0; border: 0; } }
 </style>
-
-
-<!-- GTM event helpers added -->
-<script>
-// NOTE: this block is just explanatory; actual calls are in script setup above.
-</script>
