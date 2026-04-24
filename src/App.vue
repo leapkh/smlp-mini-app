@@ -116,6 +116,11 @@
 
       <SlideDetailSheet v-if="selectedSlide" :slide="selectedSlide" @close="selectedSlide = null" />
       <ServiceDetailSheet v-if="selectedService" :service="selectedService" @close="selectedService = null" />
+      <StatusSuccessDialog
+        v-if="paymentStatus"
+        :payload="paymentStatus"
+        @ok="handleStatusOk"
+      />
       <BookingDetailSheet v-if="selectedBooking" :booking="selectedBooking" @close="selectedBooking = null" />
     </div>
   </div>
@@ -123,7 +128,7 @@
 
 <script setup>
 import { computed, defineComponent, h, onMounted, ref } from 'vue';
-import { callHandler } from 'web-bridge-gateway';
+import { callHandler, registerHandler } from 'web-bridge-gateway';
 
 const Icon = defineComponent({
   props: {
@@ -243,8 +248,23 @@ const activeTab = ref('services');
 const selectedSlide = ref(null);
 const selectedService = ref(null);
 const selectedBooking = ref(null);
+const paymentStatus = ref(null);
+
+function handleStatusOk() {
+  paymentStatus.value = null;
+  selectedSlide.value = null;
+  selectedService.value = null;
+  selectedBooking.value = null;
+  activeTab.value = 'services';
+  screen.value = 'home';
+}
 
 onMounted(async () => {
+  registerHandler('getStatus', (data, callback) => {
+    paymentStatus.value = data?.payload || data || {};
+    if (typeof callback === 'function') callback({ received: true });
+  });
+
   try {
     const data = await callHandler('getProfile', {});
     const firstName = data?.firstName || data?.payload?.firstName;
@@ -272,19 +292,35 @@ const ServiceCard = defineComponent({
   },
 });
 
+async function sha256Uppercase(value) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase();
+}
+
 const PaymentBar = defineComponent({
-  props: { amount: { type: String, required: true } },
-  setup(props) {
-    const numericAmount = computed(() => props.amount.replace('$', ''));
+  props: {
+    account: { type: String, required: true },
+    amount: { type: String, required: true },
+    currency: { type: String, required: true },
+    fee: { type: String, required: true },
+    hash: { type: String, default: '' },
+  },
+  emits: ['pay'],
+  setup(props, { emit }) {
+    const formattedAmount = computed(() => Number(props.amount || 0).toFixed(2));
     return () => h('div', { class: 'payment-bar' }, [
       h('div', { class: 'account-row' }, [
-        h('div', [h('h3', 'Savings Account'), h('p', '000 123 569 | USD')]),
-        h('button', ['Accounts ', h(Icon, { name: 'down' })]),
+        h('div', [h('h3', 'Savings Account'), h('p', `${props.account} | ${props.currency}`)]),
+        h('button', { type: 'button' }, ['Accounts ', h(Icon, { name: 'down' })]),
       ]),
-      h('button', { class: 'pay-button' }, [
+      h('button', { type: 'button', class: 'pay-button', onClick: () => emit('pay') }, [
         h('span', { class: 'aba-logo' }, [h('span', 'ABA'), h('br'), h('span', 'PAY')]),
         h('span', { class: 'pay-divider' }),
-        h('span', `Pay ${numericAmount.value} USD`),
+        h('span', `Pay ${formattedAmount.value} ${props.currency}`),
       ]),
     ]);
   },
@@ -294,6 +330,46 @@ const ServiceDetailSheet = defineComponent({
   props: { service: { type: Object, required: true } },
   emits: ['close'],
   setup(props, { emit }) {
+    const account = ref('ABA001');
+    const amount = ref('1.5');
+    const currency = ref('USD');
+    const secretKey = ref('');
+    const fee = ref('0');
+    const hash = ref('');
+    const isPaying = ref(false);
+    const errorMessage = ref('');
+
+    async function updateHash() {
+      const amountTwoDecimals = Number(amount.value || 0).toFixed(2);
+      const raw = `${account.value}${amountTwoDecimals}${currency.value}${secretKey.value}`.toUpperCase();
+      hash.value = await sha256Uppercase(raw);
+      return hash.value;
+    }
+
+    async function pay() {
+      errorMessage.value = '';
+      isPaying.value = true;
+      try {
+        const calculatedHash = await updateHash();
+        await callHandler('doPayment', {
+          account: account.value,
+          amount: amount.value,
+          currency: currency.value,
+          additionalKey: {
+            hash: calculatedHash,
+            fee: fee.value,
+          },
+        });
+      } catch (error) {
+        errorMessage.value = 'Payment handler failed. Please try again.';
+        console.warn('doPayment handler failed:', error);
+      } finally {
+        isPaying.value = false;
+      }
+    }
+
+    updateHash();
+
     return () => h('div', { class: 'sheet-layer' }, [
       h('button', { type: 'button', class: 'scrim', onClick: () => emit('close') }),
       h('div', { class: 'sheet service-sheet' }, [
@@ -315,9 +391,28 @@ const ServiceDetailSheet = defineComponent({
             h('h3', "What's included"),
             h('div', { class: 'included-list' }, props.service.included.map((item) => h('div', { key: item }, [h(Icon, { name: 'check' }), h('span', item)]))),
           ]),
+          h('section', { class: 'payment-form-section' }, [
+            h('h3', 'Payment information'),
+            h('div', { class: 'payment-form' }, [
+              h('input', { placeholder: 'Account', value: account.value, onInput: async (event) => { account.value = event.target.value; await updateHash(); } }),
+              h('input', { placeholder: 'Amount', value: amount.value, inputmode: 'decimal', onInput: async (event) => { amount.value = event.target.value; await updateHash(); } }),
+              h('input', { placeholder: 'Currency', value: currency.value, onInput: async (event) => { currency.value = event.target.value.toUpperCase(); await updateHash(); } }),
+              h('input', { placeholder: 'Secret Key', value: secretKey.value, type: 'password', onInput: async (event) => { secretKey.value = event.target.value; await updateHash(); } }),
+              h('input', { placeholder: 'Fee', value: fee.value, inputmode: 'decimal', onInput: (event) => { fee.value = event.target.value; } }),
+            ]),
+            h('p', { class: 'hash-preview' }, `Hash: ${hash.value || 'Calculating...'}`),
+            errorMessage.value ? h('p', { class: 'error-text' }, errorMessage.value) : null,
+          ]),
           h('div', { class: 'guarantee' }, [h(Icon, { name: 'shield' }), h('div', [h('h3', '100% Satisfaction Guarantee'), h('p', "If you're not happy, we'll come back and re-clean for free.")])]),
         ]),
-        h(PaymentBar, { amount: props.service.price }),
+        h(PaymentBar, {
+          account: account.value,
+          amount: amount.value,
+          currency: currency.value,
+          fee: fee.value,
+          hash: hash.value,
+          onPay: pay,
+        }),
       ]),
     ]);
   },
@@ -351,7 +446,7 @@ const BookingDetailSheet = defineComponent({
       h('button', { type: 'button', class: 'scrim', onClick: () => emit('close') }),
       h('div', { class: 'sheet simple-sheet' }, [
         h('div', { class: 'handle' }),
-        h('button', { type: 'button', class: 'close-button', onClick: () => emit('close') }, [h(Icon, { name: 'close' })]),
+        h('button', { type: 'button', onClick: () => emit('close'), class: 'close-button' }, [h(Icon, { name: 'close' })]),
         h('div', { class: 'booking-detail-head' }, [
           h('img', { src: props.booking.service.image, alt: props.booking.service.name }),
           h('div', [h('p', { class: 'status-text' }, props.booking.status), h('h2', props.booking.service.name), h('p', `Booking ID: ${props.booking.id}`)]),
@@ -363,6 +458,26 @@ const BookingDetailSheet = defineComponent({
           h('div', [h('span', 'Total'), h('strong', props.booking.service.price)]),
         ]),
         h('div', { class: 'payment-success' }, [h(Icon, { name: 'check' }), h('div', [h('strong', 'Payment successful'), h('p', props.booking.payment)])]),
+      ]),
+    ]);
+  },
+});
+
+const StatusSuccessDialog = defineComponent({
+  props: { payload: { type: Object, required: true } },
+  emits: ['ok'],
+  setup(props, { emit }) {
+    const entries = computed(() => Object.entries(props.payload || {}));
+    return () => h('div', { class: 'dialog-layer', role: 'dialog', 'aria-modal': 'true' }, [
+      h('div', { class: 'dialog-card' }, [
+        h('div', { class: 'success-icon' }, [h(Icon, { name: 'check' })]),
+        h('h2', 'Payment Successful'),
+        h('p', { class: 'dialog-subtitle' }, 'Status received from native handler.'),
+        h('div', { class: 'status-list' }, entries.value.map(([key, value]) => h('div', { key }, [
+          h('span', key),
+          h('strong', typeof value === 'object' ? JSON.stringify(value) : String(value)),
+        ]))),
+        h('button', { type: 'button', class: 'primary-button', onClick: () => emit('ok') }, 'Ok'),
       ]),
     ]);
   },
@@ -454,6 +569,21 @@ h2 { font-size: 20px; }
 .guarantee { display: flex; gap: 12px; border-radius: 24px; background: #ecfdf5; color: #065f46; padding: 16px; }
 .guarantee > svg { color: #059669; width: 32px; height: 32px; flex-shrink: 0; }
 .guarantee p { margin-top: 4px; color: #047857; font-size: 14px; line-height: 1.45; }
+.payment-form-section { border-top: 1px solid #f1f5f9; padding-top: 18px; }
+.payment-form { margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.payment-form input { width: 100%; border: 1px solid #e2e8f0; border-radius: 16px; padding: 12px 14px; font: inherit; color: #0f172a; background: #fff; outline: none; }
+.payment-form input:focus { border-color: #0ea5e9; box-shadow: 0 0 0 3px rgba(14, 165, 233, .14); }
+.hash-preview { margin-top: 10px; word-break: break-all; color: #64748b; font-size: 11px; line-height: 1.45; }
+.error-text { margin-top: 8px; color: #dc2626; font-size: 13px; font-weight: 700; }
+.dialog-layer { position: absolute; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(2, 6, 23, .5); }
+.dialog-card { width: 100%; border-radius: 28px; background: white; padding: 24px; text-align: center; box-shadow: 0 24px 48px rgba(15, 23, 42, .24); }
+.success-icon { width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 999px; background: #ecfdf5; color: #059669; display: grid; place-items: center; }
+.success-icon svg { width: 34px; height: 34px; }
+.dialog-subtitle { margin-top: 6px; color: #64748b; font-size: 14px; }
+.status-list { margin-top: 18px; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.status-list div { border-radius: 16px; background: #f8fafc; padding: 10px 12px; }
+.status-list span { display: block; color: #94a3b8; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+.status-list strong { display: block; margin-top: 3px; color: #0f172a; font-size: 13px; word-break: break-word; }
 .payment-bar { flex-shrink: 0; border-top: 1px solid #f1f5f9; border-top-left-radius: 28px; border-top-right-radius: 28px; background: white; padding: 16px; box-shadow: 0 -8px 28px rgba(15, 23, 42, .1); }
 .account-row { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; }
 .account-row h3 { font-size: 16px; }
